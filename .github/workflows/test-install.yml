@@ -16,13 +16,13 @@ jobs:
 
       # GH runners have Git and Node pre-installed.
       # Remove Node so we test the install path.
-      # Git stays — we verify bash.exe discovery works with it present.
+      # Git stays -- we verify bash.exe discovery works with it present.
       - name: Remove Node.js from PATH
         shell: powershell
         run: |
           $nodePath = (Get-Command node -ErrorAction SilentlyContinue).Source
           if ($nodePath) {
-            Write-Host "Node.js found at $nodePath — removing from PATH"
+            Write-Host "Node.js found at $nodePath -- removing from PATH"
             $nodeDir = Split-Path $nodePath
             $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -ne $nodeDir }) -join ';'
           }

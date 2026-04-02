@@ -280,10 +280,17 @@ else
     export PATH="$HOME/.local/bin:$HOME/.claude/bin:$HOME/.claude:$PATH"
     if command -v claude &>/dev/null; then installed=true; fi
 
-    # Fallback: npm global
+    # Fallback: npm global (may need sudo on Linux)
     if [[ "$installed" == "false" ]]; then
         show_action "Trying npm install..."
-        npm install -g @anthropic-ai/claude-code 2>/dev/null || true
+        if [[ "$IS_LINUX" == "true" ]] && [[ "$(id -u)" -ne 0 ]]; then
+            sudo npm install -g @anthropic-ai/claude-code 2>/dev/null || true
+        else
+            npm install -g @anthropic-ai/claude-code 2>/dev/null || true
+        fi
+        # npm global bin might not be in PATH
+        NPM_BIN=$(npm config get prefix 2>/dev/null)/bin
+        export PATH="$NPM_BIN:$PATH"
         if command -v claude &>/dev/null; then installed=true; fi
     fi
 
