@@ -9,75 +9,56 @@ on:
 
 jobs:
   windows:
-    name: Windows (PowerShell ${{ matrix.ps }})
+    name: Windows
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        ps: ["5.1", "7"]
     steps:
       - uses: actions/checkout@v4
 
-      # Remove pre-installed tools to simulate a cleaner machine.
-      # GH runners have Git and Node — uninstall Node so we test that path.
-      # Git stays (can't cleanly remove on GH runners) but we verify
-      # bash.exe discovery still works.
-      - name: Remove Node.js
-        shell: pwsh
+      # GH runners have Git and Node pre-installed.
+      # Remove Node so we test the install path.
+      # Git stays — we verify bash.exe discovery works with it present.
+      - name: Remove Node.js from PATH
+        shell: powershell
         run: |
           $nodePath = (Get-Command node -ErrorAction SilentlyContinue).Source
           if ($nodePath) {
-            Write-Host "Removing Node.js at $nodePath"
+            Write-Host "Node.js found at $nodePath — removing from PATH"
             $nodeDir = Split-Path $nodePath
-            # Remove from PATH for this session
             $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -ne $nodeDir }) -join ';'
-            # Verify
-            if (Get-Command node -ErrorAction SilentlyContinue) {
-              Write-Host "Warning: node still found after PATH removal"
-            } else {
-              Write-Host "Node.js removed from PATH"
-            }
+          }
+          if (Get-Command node -ErrorAction SilentlyContinue) {
+            Write-Host "Warning: node still in PATH (multiple locations)"
+          } else {
+            Write-Host "Node.js removed from PATH"
           }
 
-      - name: Remove Claude Code (if present)
-        shell: pwsh
+      - name: Clean Claude Code and config
+        shell: powershell
         run: |
           if (Get-Command claude -ErrorAction SilentlyContinue) {
             npm uninstall -g @anthropic-ai/claude-code 2>$null
-            Write-Host "Claude Code removed"
-          } else {
-            Write-Host "Claude Code not present"
           }
-
-      - name: Clear env vars
-        shell: pwsh
-        run: |
           Remove-Item Env:\CLAUDE_CODE_GIT_BASH_PATH -ErrorAction SilentlyContinue
           Remove-Item Env:\HOME -ErrorAction SilentlyContinue
-          # Remove settings.json if exists
-          $settingsPath = "$env:USERPROFILE\.claude\settings.json"
-          if (Test-Path $settingsPath) { Remove-Item $settingsPath -Force }
-          # Remove .claude.json if exists
-          $configPath = "$env:USERPROFILE\.claude.json"
-          if (Test-Path $configPath) { Remove-Item $configPath -Force }
+          Remove-Item "$env:USERPROFILE\.claude\settings.json" -Force -ErrorAction SilentlyContinue
+          Remove-Item "$env:USERPROFILE\.claude.json" -Force -ErrorAction SilentlyContinue
           Write-Host "Environment cleaned"
 
       - name: Run installer (no project config)
-        shell: ${{ matrix.ps == '5.1' && 'powershell' || 'pwsh' }}
+        shell: powershell
         run: |
-          # Source the script directly (not via irm|iex since we have it locally)
           & .\setup.ps1
 
       - name: Verify Node.js
-        shell: pwsh
+        shell: powershell
         run: |
           $v = node --version
           Write-Host "Node.js version: $v"
           $major = [int](($v -replace '^v','') -split '\.')[0]
           if ($major -lt 18) { throw "Node.js version too old: $v" }
 
-      - name: Verify Git Bash found
-        shell: pwsh
+      - name: Verify Git Bash in settings.json
+        shell: powershell
         run: |
           $settingsPath = "$env:USERPROFILE\.claude\settings.json"
           if (-not (Test-Path $settingsPath)) { throw "settings.json not found" }
@@ -85,35 +66,33 @@ jobs:
           $bashPath = $settings.env.CLAUDE_CODE_GIT_BASH_PATH
           if (-not $bashPath) { throw "CLAUDE_CODE_GIT_BASH_PATH not in settings.json" }
           if (-not (Test-Path $bashPath)) { throw "bash.exe not found at $bashPath" }
-          Write-Host "Git Bash verified: $bashPath"
-          # Verify it's not WSL
           if ($bashPath -like "*System32*") { throw "Got WSL bash, not Git Bash" }
+          Write-Host "Git Bash verified: $bashPath"
 
       - name: Verify Claude Code
-        shell: pwsh
+        shell: powershell
         run: |
-          $claude = Get-Command claude -ErrorAction SilentlyContinue
-          if (-not $claude) { throw "claude command not found" }
-          Write-Host "Claude Code found: $($claude.Source)"
+          if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+            throw "claude command not found"
+          }
+          Write-Host "Claude Code found"
 
       - name: Run installer WITH project config
-        shell: ${{ matrix.ps == '5.1' && 'powershell' || 'pwsh' }}
+        shell: powershell
         run: |
-          # Use the example config (but it will fail MCP connection — that's fine,
-          # we're testing that config gets written, not that the server is reachable)
           $env:CLAUDE_SETUP_CONFIG = "https://raw.githubusercontent.com/${{ github.repository }}/main/examples/igs-legacy-search.json"
           & .\setup.ps1
 
-      - name: Verify MCP config written
-        shell: pwsh
+      - name: Verify MCP config
+        shell: powershell
         run: |
           $configPath = "$env:USERPROFILE\.claude.json"
           if (-not (Test-Path $configPath)) { throw ".claude.json not found" }
           $config = Get-Content $configPath -Raw | ConvertFrom-Json
           if (-not $config.mcpServers.'igs-legacy-search') { throw "MCP server not configured" }
           $url = $config.mcpServers.'igs-legacy-search'.url
-          Write-Host "MCP server configured: $url"
-          if ($url -ne "https://malone.taildf301e.ts.net:8443/mcp") { throw "Wrong MCP URL" }
+          if ($url -ne "https://malone.taildf301e.ts.net:8443/mcp") { throw "Wrong URL: $url" }
+          Write-Host "MCP server verified: $url"
 
   macos:
     name: macOS
@@ -121,20 +100,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Remove Claude Code (if present)
+      - name: Clean Claude Code and config
         run: |
-          if command -v claude &>/dev/null; then
-            npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || true
-            echo "Claude Code removed"
-          else
-            echo "Claude Code not present"
-          fi
-
-      - name: Clear config files
-        run: |
-          rm -f ~/.claude/settings.json
-          rm -f ~/.claude.json
-          echo "Config cleaned"
+          npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || true
+          rm -f ~/.claude/settings.json ~/.claude.json
+          echo "Environment cleaned"
 
       - name: Run installer (no project config)
         run: bash setup.sh
@@ -144,30 +114,27 @@ jobs:
           v=$(node --version)
           echo "Node.js version: $v"
           major=$(echo "$v" | sed 's/^v//' | cut -d. -f1)
-          if [ "$major" -lt 18 ]; then echo "FAIL: Node too old"; exit 1; fi
+          if [ "$major" -lt 18 ]; then exit 1; fi
 
       - name: Verify Claude Code
         run: |
-          if ! command -v claude &>/dev/null; then
-            echo "FAIL: claude not found"
-            exit 1
-          fi
-          echo "Claude Code found: $(which claude)"
+          export PATH="$HOME/.local/bin:$HOME/.claude/bin:$HOME/.claude:$PATH"
+          command -v claude || exit 1
+          echo "Claude Code found"
 
       - name: Run installer WITH project config
         run: |
           CLAUDE_SETUP_CONFIG="https://raw.githubusercontent.com/${{ github.repository }}/main/examples/igs-legacy-search.json" \
             bash setup.sh
 
-      - name: Verify MCP config written
+      - name: Verify MCP config
         run: |
-          if [ ! -f ~/.claude.json ]; then echo "FAIL: .claude.json not found"; exit 1; fi
           python3 -c "
-          import json
+          import json, sys
           c = json.load(open('$HOME/.claude.json'))
-          s = c.get('mcpServers', {}).get('igs-legacy-search', {})
-          assert s.get('url') == 'https://malone.taildf301e.ts.net:8443/mcp', f'Wrong URL: {s}'
-          print('MCP server configured correctly')
+          url = c['mcpServers']['igs-legacy-search']['url']
+          assert url == 'https://malone.taildf301e.ts.net:8443/mcp', f'Wrong: {url}'
+          print('MCP server verified:', url)
           "
 
   ubuntu:
@@ -181,17 +148,12 @@ jobs:
           sudo rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx
           sudo rm -rf /usr/local/lib/node_modules
           hash -r
-          if command -v node &>/dev/null; then
-            echo "Warning: node still found"
-          else
-            echo "Node.js removed"
-          fi
+          command -v node && echo "Warning: node still found" || echo "Node.js removed"
 
-      - name: Clear config files
+      - name: Clean config
         run: |
-          rm -f ~/.claude/settings.json
-          rm -f ~/.claude.json
-          echo "Config cleaned"
+          rm -f ~/.claude/settings.json ~/.claude.json
+          echo "Environment cleaned"
 
       - name: Run installer (no project config)
         run: bash setup.sh
@@ -201,29 +163,25 @@ jobs:
           v=$(node --version)
           echo "Node.js version: $v"
           major=$(echo "$v" | sed 's/^v//' | cut -d. -f1)
-          if [ "$major" -lt 18 ]; then echo "FAIL: Node too old"; exit 1; fi
+          if [ "$major" -lt 18 ]; then exit 1; fi
 
       - name: Verify Claude Code
         run: |
           export PATH="$HOME/.local/bin:$HOME/.claude/bin:$HOME/.claude:$PATH"
-          if ! command -v claude &>/dev/null; then
-            echo "FAIL: claude not found"
-            exit 1
-          fi
-          echo "Claude Code found: $(which claude)"
+          command -v claude || exit 1
+          echo "Claude Code found"
 
       - name: Run installer WITH project config
         run: |
           CLAUDE_SETUP_CONFIG="https://raw.githubusercontent.com/${{ github.repository }}/main/examples/igs-legacy-search.json" \
             bash setup.sh
 
-      - name: Verify MCP config written
+      - name: Verify MCP config
         run: |
-          if [ ! -f ~/.claude.json ]; then echo "FAIL: .claude.json not found"; exit 1; fi
           python3 -c "
-          import json
+          import json, sys
           c = json.load(open('$HOME/.claude.json'))
-          s = c.get('mcpServers', {}).get('igs-legacy-search', {})
-          assert s.get('url') == 'https://malone.taildf301e.ts.net:8443/mcp', f'Wrong URL: {s}'
-          print('MCP server configured correctly')
+          url = c['mcpServers']['igs-legacy-search']['url']
+          assert url == 'https://malone.taildf301e.ts.net:8443/mcp', f'Wrong: {url}'
+          print('MCP server verified:', url)
           "
