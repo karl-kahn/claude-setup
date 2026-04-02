@@ -1,0 +1,12 @@
+{
+  "projectName": "IGS Legacy Project Search",
+  "mcpServers": {
+    "igs-legacy-search": {
+      "type": "http",
+      "url": "https://malone.taildf301e.ts.net:8443/mcp",
+      "headers": {
+        "Authorization": "Bearer 2KL2PzA9eKNSFdmsDY1j0aB5R_aEBMFM8arFCJicgxg"
+      }
+    }
+  }
+}
