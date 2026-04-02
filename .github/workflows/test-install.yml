@@ -72,10 +72,25 @@ jobs:
       - name: Verify Claude Code
         shell: powershell
         run: |
+          # Refresh PATH from registry (installer set it there)
+          $machinePath = [System.Environment]::GetEnvironmentVariable("PATH", "Machine")
+          $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
+          $env:PATH = "$userPath;$machinePath"
           if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
-            throw "claude command not found"
+            # Also check common install locations directly
+            $candidates = @(
+              "$env:LOCALAPPDATA\Programs\claude-code\claude.exe",
+              "$env:APPDATA\npm\claude.cmd",
+              "$env:ProgramFiles\Anthropic\Claude Code\claude.exe"
+            )
+            $found = $false
+            foreach ($c in $candidates) {
+              if (Test-Path $c) { Write-Host "Found at $c"; $found = $true; break }
+            }
+            if (-not $found) { throw "claude command not found anywhere" }
+          } else {
+            Write-Host "Claude Code found"
           }
-          Write-Host "Claude Code found"
 
       - name: Run installer WITH project config
         shell: powershell
